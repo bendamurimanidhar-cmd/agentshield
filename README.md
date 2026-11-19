@@ -39,29 +39,73 @@ Where and why teams use AgentShield in production:
 
 ---
 
-## 🚀 Quickstart: Download & Activate
+## 🚀 Download & Installation by Operating System
 
-### Method A: 1-Line Install directly from GitHub (Recommended)
-No cloning required. Run directly in your terminal:
+### 📦 Direct File Downloads (All Platforms)
+Download standalone installation packages directly from [GitHub Releases v1.0.0](https://github.com/bendamurimanidhar-cmd/agentshield/releases/tag/v1.0.0):
+
+| Platform | Download Link | File Type | Size |
+| :--- | :--- | :--- | :--- |
+| **All Platforms (Universal)** | 📦 **[Download agentshield-1.0.0-py3-none-any.whl](https://github.com/bendamurimanidhar-cmd/agentshield/releases/download/v1.0.0/agentshield-1.0.0-py3-none-any.whl)** | Pre-compiled Wheel | ~17 KB |
+| **Source Archive (Linux/macOS/Win)** | 🗜️ **[Download agentshield-1.0.0.tar.gz](https://github.com/bendamurimanidhar-cmd/agentshield/releases/download/v1.0.0/agentshield-1.0.0.tar.gz)** | Source Tarball | ~19 KB |
+
+---
+
+### 🍏 Apple macOS
+Open your Terminal and run:
+
 ```bash
+# 1. Install directly from GitHub
 pip install git+https://github.com/bendamurimanidhar-cmd/agentshield.git
+
+# 2. (Optional) Enable Auto-Start on System Boot & Auto-Restart on Crash
+agentshield service install
+
+# 3. Start proxy manually if not using service
+agentshield
 ```
-*(Or with `uv`)*:
+*(Uses macOS native `launchd` to keep the firewall running across restarts with zero terminal windows)*
+
+---
+
+### 🐧 Linux (Ubuntu, Debian, RedHat, CentOS, Arch)
+Open your bash shell and run:
+
 ```bash
+# 1. Install directly from GitHub
+pip3 install git+https://github.com/bendamurimanidhar-cmd/agentshield.git
+
+# 2. (Optional) Enable systemd User Service to survive reboots
+agentshield service install
+
+# 3. Start proxy manually if not using service
+agentshield
+```
+*(Uses Linux `systemd` user service to keep the firewall running 24/7)*
+
+---
+
+### 🪟 Microsoft Windows
+Open **PowerShell** or **Command Prompt** (cmd.exe) and run:
+
+```powershell
+# 1. Install directly from GitHub
+pip install git+https://github.com/bendamurimanidhar-cmd/agentshield.git
+
+# 2. Launch the transparent firewall gateway
+agentshield
+```
+
+---
+
+### ⚡ Alternative: 1-Click Install via `uv` or Clone
+```bash
+# Fast install with uv tool
 uv tool install git+https://github.com/bendamurimanidhar-cmd/agentshield.git
-```
 
-### Method B: Clone from Source
-```bash
+# Or clone from source
 git clone https://github.com/bendamurimanidhar-cmd/agentshield.git
-cd agentshield
-pip install -e .
-```
-
-### Method C: Pre-Built Wheel
-Download `.whl` from [GitHub Releases v1.0.0](https://github.com/bendamurimanidhar-cmd/agentshield/releases/tag/v1.0.0):
-```bash
-pip install agentshield-1.0.0-py3-none-any.whl
+cd agentshield && pip install -e .
 ```
 
 ---
