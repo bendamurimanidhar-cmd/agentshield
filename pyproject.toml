@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentshield"
+version = "1.0.0"
+description = "Sub-5ms Runtime AI Firewall & Security Gateway for Enterprise LLM Agents"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+    { name = "DeepMind & Engineering Squad" }
+]
+keywords = ["ai-security", "prompt-injection", "firewall", "dlp", "llm-guard", "soc2", "tool-gatekeeper"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence"
+]
+
+[project.scripts]
+agentshield = "agentshield.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agentshield*"]

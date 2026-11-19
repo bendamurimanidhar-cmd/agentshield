@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+*$py.class
+audit.jsonl
+build/
+dist/
+*.egg-info/
+.DS_Store
