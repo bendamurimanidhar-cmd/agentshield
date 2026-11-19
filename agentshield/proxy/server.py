@@ -59,108 +59,114 @@ class AgentShieldProxyHandler(http.server.BaseHTTPRequestHandler):
         self.send_error(404, "Endpoint Not Found")
 
     def do_POST(self):
-        content_len = int(self.headers.get("Content-Length", 0))
-        raw_body = self.rfile.read(content_len).decode("utf-8", errors="ignore")
-
-        # 1. Parse payload text (OpenAI / Anthropic format or raw text)
-        extracted_text = raw_body
-        tool_calls = []
-        is_json = False
-
         try:
-            parsed_json = json.loads(raw_body)
-            is_json = True
-            # Extract messages if standard OpenAI chat payload
-            if "messages" in parsed_json and isinstance(parsed_json["messages"], list):
-                extracted_text = " ".join([m.get("content", "") for m in parsed_json["messages"] if isinstance(m.get("content"), str)])
-            elif "prompt" in parsed_json:
-                extracted_text = str(parsed_json["prompt"])
-            elif "tool_calls" in parsed_json:
-                tool_calls = parsed_json["tool_calls"]
-        except Exception:
-            extracted_text = raw_body
+            content_len = int(self.headers.get("Content-Length", 0))
+            raw_body = self.rfile.read(content_len).decode("utf-8", errors="ignore")
 
-        # 2. RUNTIME FIREWALL SCAN (Prompt Injection, Leetspeak, Jailbreaks)
-        fw_res = self.firewall.inspect_prompt(extracted_text)
-        if not fw_res["allowed"]:
-            self._send_blocked_response(
-                status_code=403,
-                reason="BLOCKED_BY_AGENTSHIELD_FIREWALL",
-                violations=fw_res["violations"],
-                latency_ms=fw_res["latency_ms"]
-            )
-            self.logger.log_event("FIREWALL_INTERCEPT", {
+            # 1. Parse payload text (OpenAI / Anthropic format or raw text)
+            extracted_text = raw_body
+            tool_calls = []
+            is_json = False
+
+            try:
+                parsed_json = json.loads(raw_body)
+                is_json = True
+                # Extract messages if standard OpenAI chat payload
+                if "messages" in parsed_json and isinstance(parsed_json["messages"], list):
+                    extracted_text = " ".join([m.get("content", "") for m in parsed_json["messages"] if isinstance(m.get("content"), str)])
+                elif "prompt" in parsed_json:
+                    extracted_text = str(parsed_json["prompt"])
+                
+                if "tool_calls" in parsed_json and isinstance(parsed_json["tool_calls"], list):
+                    tool_calls = parsed_json["tool_calls"]
+            except Exception:
+                extracted_text = raw_body
+
+            # 2. RUNTIME FIREWALL SCAN (Prompt Injection, Leetspeak, Jailbreaks)
+            fw_res = self.firewall.inspect_prompt(extracted_text)
+            if not fw_res["allowed"]:
+                self._send_blocked_response(
+                    status_code=403,
+                    reason="BLOCKED_BY_AGENTSHIELD_FIREWALL",
+                    violations=fw_res["violations"],
+                    latency_ms=fw_res["latency_ms"]
+                )
+                self.logger.log_event("FIREWALL_INTERCEPT", {
+                    "client": self.client_address[0],
+                    "path": self.path,
+                    "action": "BLOCKED",
+                    "violations": fw_res["violations"]
+                })
+                return
+
+            # 3. RUNTIME TOOL EXECUTION GATEKEEPER
+            if tool_calls:
+                for tc in tool_calls:
+                    func = tc.get("function", {})
+                    name = func.get("name", "unknown")
+                    args = func.get("arguments", {})
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except Exception:
+                            args = {"raw": args}
+                    gk_res = self.gatekeeper.authorize_tool_call(name, args)
+                    if not gk_res["authorized"]:
+                        self._send_blocked_response(
+                            status_code=403,
+                            reason="BLOCKED_BY_TOOL_GATEKEEPER",
+                            violations=[{"policy": gk_res.get("policy"), "reason": gk_res.get("reason")}],
+                            latency_ms=fw_res["latency_ms"]
+                        )
+                        self.logger.log_event("TOOL_INTERCEPT", {
+                            "client": self.client_address[0],
+                            "tool": name,
+                            "action": "BLOCKED",
+                            "reason": gk_res.get("reason")
+                        })
+                        return
+
+            # 4. RUNTIME DATA LOSS PREVENTION (DLP Redaction)
+            sanitized_text, dlp_meta = self.dlp.scan_and_redact(extracted_text)
+
+            # Log authorized clean transaction
+            audit_record = self.logger.log_event("REQUEST_CLEARED", {
                 "client": self.client_address[0],
                 "path": self.path,
-                "action": "BLOCKED",
-                "violations": fw_res["violations"]
+                "latency_ms": fw_res["latency_ms"],
+                "dlp_redactions": dlp_meta["findings_count"]
             })
-            return
 
-        # 3. RUNTIME TOOL EXECUTION GATEKEEPER
-        if tool_calls:
-            for tc in tool_calls:
-                func = tc.get("function", {})
-                name = func.get("name", "unknown")
-                args = func.get("arguments", {})
-                if isinstance(args, str):
-                    try:
-                        args = json.loads(args)
-                    except Exception:
-                        args = {"raw": args}
-                gk_res = self.gatekeeper.authorize_tool_call(name, args)
-                if not gk_res["authorized"]:
-                    self._send_blocked_response(
-                        status_code=403,
-                        reason="BLOCKED_BY_TOOL_GATEKEEPER",
-                        violations=[{"policy": gk_res.get("policy"), "reason": gk_res.get("reason")}],
-                        latency_ms=fw_res["latency_ms"]
-                    )
-                    self.logger.log_event("TOOL_INTERCEPT", {
-                        "client": self.client_address[0],
-                        "tool": name,
-                        "action": "BLOCKED",
-                        "reason": gk_res.get("reason")
-                    })
-                    return
-
-        # 4. RUNTIME DATA LOSS PREVENTION (DLP Redaction)
-        sanitized_text, dlp_meta = self.dlp.scan_and_redact(extracted_text)
-
-        # Log authorized clean transaction
-        audit_record = self.logger.log_event("REQUEST_CLEARED", {
-            "client": self.client_address[0],
-            "path": self.path,
-            "latency_ms": fw_res["latency_ms"],
-            "dlp_redactions": dlp_meta["findings_count"]
-        })
-
-        # 5. FORWARDING / RESPONSE
-        if self.upstream_url:
-            # If sensitive credentials detected, sanitize the payload before forwarding upstream
-            payload_to_forward = raw_body
-            if dlp_meta["has_sensitive_data"]:
-                payload_to_forward, _ = self.dlp.scan_and_redact(raw_body)
-            self._forward_upstream(payload_to_forward)
-        else:
-            # Standalone Protected Shield Mock / Pass-through Response
-            resp_data = {
-                "status": "APPROVED",
-                "shield": "AgentShield v1.0.0",
-                "firewall": "PASSED (<0.05ms)",
-                "dlp_redactions": dlp_meta["findings_count"],
-                "sanitized_input": sanitized_text if dlp_meta["has_sensitive_data"] else "CLEAN",
-                "audit_block_hash": audit_record["hash"][:16] + "...",
-                "message": "Traffic cleared by autonomous AI guardrail."
-            }
-            body = json.dumps(resp_data, indent=2).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("X-AgentShield-Latency", f"{fw_res['latency_ms']}ms")
-            self.send_header("X-AgentShield-Status", "CLEARED")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            # 5. FORWARDING / RESPONSE
+            if self.upstream_url:
+                # If sensitive credentials detected, sanitize the payload before forwarding upstream
+                payload_to_forward = raw_body
+                if dlp_meta["has_sensitive_data"]:
+                    payload_to_forward, _ = self.dlp.scan_and_redact(raw_body)
+                self._forward_upstream(payload_to_forward)
+            else:
+                # Standalone Protected Shield Mock / Pass-through Response
+                resp_data = {
+                    "status": "APPROVED",
+                    "shield": "AgentShield v1.0.0",
+                    "firewall": "PASSED (<0.05ms)",
+                    "dlp_redactions": dlp_meta["findings_count"],
+                    "sanitized_input": sanitized_text if dlp_meta["has_sensitive_data"] else "CLEAN",
+                    "audit_block_hash": audit_record["hash"][:16] + "...",
+                    "message": "Traffic cleared by autonomous AI guardrail."
+                }
+                body = json.dumps(resp_data, indent=2).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("X-AgentShield-Latency", f"{fw_res['latency_ms']}ms")
+                self.send_header("X-AgentShield-Status", "CLEARED")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.send_error(500, f"Internal Error: {str(e)}")
 
     def _send_blocked_response(self, status_code: int, reason: str, violations: list, latency_ms: float):
         payload = {
@@ -208,10 +214,15 @@ class AgentShieldProxyHandler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self.send_error(502, f"Bad Gateway: {str(e)}")
 
+class ConcurrentThreadingHTTPServer(http.server.ThreadingHTTPServer):
+    request_queue_size = 256
+    daemon_threads = True
+
 def run_proxy_server(host: str = "127.0.0.1", port: int = 8080, upstream: Optional[str] = None):
     AgentShieldProxyHandler.upstream_url = upstream
     server_address = (host, port)
-    httpd = http.server.HTTPServer(server_address, AgentShieldProxyHandler)
+    # Use ConcurrentThreadingHTTPServer with request_queue_size=256 for high-concurrency multi-agent swarms
+    httpd = ConcurrentThreadingHTTPServer(server_address, AgentShieldProxyHandler)
 
     print("\n" + "=" * 65)
     print(" 🛡️  AgentShield Autonomous AI Firewall & Security Gateway")

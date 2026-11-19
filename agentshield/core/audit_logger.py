@@ -8,12 +8,14 @@ import hashlib
 import json
 import time
 import os
+import threading
 from typing import Dict, Any
 
 class AuditLogger:
     def __init__(self, log_path: str = None):
         self.log_path = log_path
         self.previous_hash = "GENESIS_BLOCK"
+        self._lock = threading.Lock()
 
         # Resume cryptographic chain if log file already exists
         if self.log_path and os.path.exists(self.log_path):
@@ -28,29 +30,30 @@ class AuditLogger:
                 pass
 
     def log_event(self, event_type: str, details: Dict[str, Any]) -> Dict[str, Any]:
-        record = {
-            "timestamp": time.time(),
-            "event_type": event_type,
-            "details": details,
-            "prev_hash": self.previous_hash
-        }
-        serialized = json.dumps(record, sort_keys=True).encode("utf-8")
-        current_hash = hashlib.sha256(serialized).hexdigest()
-        record["hash"] = current_hash
-        self.previous_hash = current_hash
+        with self._lock:
+            record = {
+                "timestamp": time.time(),
+                "event_type": event_type,
+                "details": details,
+                "prev_hash": self.previous_hash
+            }
+            serialized = json.dumps(record, sort_keys=True).encode("utf-8")
+            current_hash = hashlib.sha256(serialized).hexdigest()
+            record["hash"] = current_hash
+            self.previous_hash = current_hash
 
-        if self.log_path:
-            try:
-                dirname = os.path.dirname(os.path.abspath(self.log_path))
-                if dirname:
-                    os.makedirs(dirname, exist_ok=True)
-                with open(self.log_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(record) + "\n")
-            except OSError:
-                # Graceful fallback if current directory is read-only
-                pass
+            if self.log_path:
+                try:
+                    dirname = os.path.dirname(os.path.abspath(self.log_path))
+                    if dirname:
+                        os.makedirs(dirname, exist_ok=True)
+                    with open(self.log_path, "a", encoding="utf-8") as f:
+                        f.write(json.dumps(record) + "\n")
+                except OSError:
+                    # Graceful fallback if directory is read-only
+                    pass
 
-        return record
+            return record
 
     def verify_chain(self, log_path: str = None) -> Dict[str, Any]:
         target_path = log_path or self.log_path
