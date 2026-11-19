@@ -41,6 +41,8 @@ Where and why teams use AgentShield in production:
 
 ## 🚀 Download & Installation by Operating System
 
+> 💎 **Zero External Dependencies:** Unlike EDA or hardware suites, **AgentShield is 100% self-contained in pure standard-library Python**. It requires **zero C++ compilers, zero databases (no Redis/PostgreSQL), and zero external packages**. Every feature — prompt firewall, DLP secret redaction, tool gatekeeper, reverse proxy, and SHA-256 cryptographic audit ledger — works **100% out of the box immediately upon download**.
+
 ### 📦 Direct File Downloads (All Platforms)
 Download standalone installation packages directly from [GitHub Releases v1.0.0](https://github.com/bendamurimanidhar-cmd/agentshield/releases/tag/v1.0.0):
 
