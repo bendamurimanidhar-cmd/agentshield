@@ -8,6 +8,7 @@ import re
 import time
 import base64
 import unicodedata
+import urllib.parse
 from typing import Dict, Any, List
 
 class AIFirewall:
@@ -38,20 +39,22 @@ class AIFirewall:
             re.compile(r'\brepeat\s+(all\s+)?(the\s+)?(initial|original|system)\s+(instructions|prompts)', re.IGNORECASE),
             re.compile(r'\boutput\s+the\s+text\s+above\b', re.IGNORECASE),
             re.compile(r'\breveal\s+your\s+(system\s+|hidden\s+)?(prompt|instructions)\b', re.IGNORECASE),
-            re.compile(r'(\[system\]|\[system_instruction\]|---\s*(?:begin|end)\s*system\s*(?:prompt|instructions)\s*---)', re.IGNORECASE),
+            re.compile(r'(\[system\]|\[system_instruction\]|<\|im_start\|>|<\|im_end\|>|\[INST\]|\[/INST\]|---\s*(?:begin|end)\s*system\s*(?:prompt|instructions)\s*---)', re.IGNORECASE),
             re.compile(r'<script.*?>.*?</script>', re.IGNORECASE | re.DOTALL),
             re.compile(r'\bjavascript:\s*', re.IGNORECASE),
             re.compile(r'\bbase64\s+decode.*?(?:rm\s+-rf|sudo|chmod|cat\s+/etc)', re.IGNORECASE)
         ]
 
-        # 2. Spaceless Invariant Signatures (catches extreme character spacing / concatenation)
+        # 2. Spaceless Invariant Signatures (catches extreme character spacing, punctuation, & concatenation)
         self.spaceless_patterns = [
             re.compile(r'ignore(?:all)?(?:previous|prior|above)(?:instructions|prompts|rules)', re.IGNORECASE),
             re.compile(r'disregard(?:all)?(?:previous|prior|above)(?:instructions|prompts|rules)', re.IGNORECASE),
-            re.compile(r'(?:danmode|jailbreak|unfilteredmode|developermode)', re.IGNORECASE),
+            re.compile(r'forget(?:all)?(?:previous|prior)(?:instructions|prompts|rules)', re.IGNORECASE),
+            re.compile(r'(?:danmode|jailbreak|unfilteredmode|developermode|godmode)', re.IGNORECASE),
             re.compile(r'whatisyoursystemprompt', re.IGNORECASE),
             re.compile(r'repeat(?:all)?(?:the)?(?:initial|original|system)(?:instructions|prompts)', re.IGNORECASE),
             re.compile(r'outputthetextabove', re.IGNORECASE),
+            re.compile(r'revealyour(?:system|hidden)?(?:prompt|instructions)', re.IGNORECASE),
             re.compile(r'actas(?:an?)?(?:evil|unrestricted|unconstrained|nefarious|unethical|jailbroken|bad)+(?:ai|agent|assistant|bot|llm|model)', re.IGNORECASE)
         ]
 
@@ -67,9 +70,11 @@ class AIFirewall:
 
     def _get_spaceless_text(self, text: str) -> str:
         normalized = unicodedata.normalize('NFKD', text)
-        normalized = re.sub(r'[\u200b-\u200f\ufeff\u00ad\u2060\s]', '', normalized)
+        # First translate leetspeak on lowercased characters
         leet_chars = [self.leet_map.get(ch, ch) for ch in normalized.lower()]
-        return "".join(leet_chars)
+        joined = "".join(leet_chars)
+        # Strip all punctuation, spaces, zero-width chars, and symbols
+        return re.sub(r'[^a-z0-9]', '', joined)
 
     def _inspect_base64_payloads(self, text: str) -> List[Dict[str, Any]]:
         findings = []
@@ -118,41 +123,50 @@ class AIFirewall:
             })
             text = text[:self.max_input_len]
 
-        # 1. Inspect raw text
-        for pat in self.injection_patterns:
-            m = pat.search(text)
-            if m:
-                violations.append({
-                    "rule": "PROMPT_INJECTION_DETECTED",
-                    "matched": m.group(0),
-                    "severity": "CRITICAL"
-                })
+        # Check raw text and URL-decoded text
+        unquoted = urllib.parse.unquote(text)
+        texts_to_check = [text]
+        if unquoted != text:
+            texts_to_check.append(unquoted)
 
-        # 2. Inspect normalized text (catches spacing, leetspeak, zero-width)
-        normalized = self._normalize_text(text)
-        for pat in self.injection_patterns:
-            m = pat.search(normalized)
-            if m and not any(v.get("matched") == m.group(0) for v in violations):
-                violations.append({
-                    "rule": "OBFUSCATED_PROMPT_INJECTION",
-                    "matched": m.group(0),
-                    "severity": "CRITICAL"
-                })
+        for current_text in texts_to_check:
+            # 1. Inspect text against standard patterns
+            for pat in self.injection_patterns:
+                m = pat.search(current_text)
+                if m and not any(v.get("matched") == m.group(0) for v in violations):
+                    violations.append({
+                        "rule": "PROMPT_INJECTION_DETECTED",
+                        "matched": m.group(0),
+                        "severity": "CRITICAL"
+                    })
 
-        # 3. Inspect spaceless invariant text
-        spaceless = self._get_spaceless_text(text)
-        for pat in self.spaceless_patterns:
-            m = pat.search(spaceless)
-            if m and not any(v.get("matched") == m.group(0) for v in violations):
-                violations.append({
-                    "rule": "SPACELESS_OBFUSCATED_INJECTION",
-                    "matched": m.group(0),
-                    "severity": "CRITICAL"
-                })
+            # 2. Inspect normalized text (catches spacing, leetspeak, zero-width)
+            normalized = self._normalize_text(current_text)
+            for pat in self.injection_patterns:
+                m = pat.search(normalized)
+                if m and not any(v.get("matched") == m.group(0) for v in violations):
+                    violations.append({
+                        "rule": "OBFUSCATED_PROMPT_INJECTION",
+                        "matched": m.group(0),
+                        "severity": "CRITICAL"
+                    })
 
-        # 4. Inspect embedded Base64 payloads
-        b64_violations = self._inspect_base64_payloads(text)
-        violations.extend(b64_violations)
+            # 3. Inspect spaceless invariant text (catches punctuation, concatenation, and symbol interleaving)
+            spaceless = self._get_spaceless_text(current_text)
+            for pat in self.spaceless_patterns:
+                m = pat.search(spaceless)
+                if m and not any(v.get("matched") == m.group(0) for v in violations):
+                    violations.append({
+                        "rule": "SPACELESS_OBFUSCATED_INJECTION",
+                        "matched": m.group(0),
+                        "severity": "CRITICAL"
+                    })
+
+            # 4. Inspect embedded Base64 payloads
+            b64_violations = self._inspect_base64_payloads(current_text)
+            for bv in b64_violations:
+                if not any(v.get("matched") == bv["matched"] for v in violations):
+                    violations.append(bv)
 
         duration_ms = (time.perf_counter() - start) * 1000.0
         allowed = (len(violations) == 0)

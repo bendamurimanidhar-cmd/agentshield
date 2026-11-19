@@ -24,7 +24,7 @@ class PIISanitizer:
 
     def scan_and_redact(self, text: str) -> Tuple[str, Dict[str, Any]]:
         findings = []
-        spans_to_replace = [] # List of (start, end, replacement_tag, rule_name)
+        raw_spans = [] # List of (start, end, replacement_tag, rule_name)
 
         for rule_name, pattern in self.dlp_rules.items():
             for m in pattern.finditer(text):
@@ -33,15 +33,29 @@ class PIISanitizer:
                     start, end = m.span(1)
                 else:
                     start, end = m.span(0)
-                spans_to_replace.append((start, end, f"[REDACTED_{rule_name}]", rule_name))
+                raw_spans.append((start, end, f"[REDACTED_{rule_name}]", rule_name))
                 findings.append({"type": rule_name, "value_length": end - start})
 
-        # Sort spans in reverse order by start index so replacements do not alter preceding offsets
-        spans_to_replace.sort(key=lambda s: s[0], reverse=True)
+        # Sort spans: earliest start first; for identical starts, widest end first
+        raw_spans.sort(key=lambda s: (s[0], -s[1]))
 
-        sanitized = text
-        for start, end, tag, _ in spans_to_replace:
-            sanitized = sanitized[:start] + tag + sanitized[end:]
+        # Filter out overlapping/nested spans to prevent string offset corruption
+        clean_spans = []
+        last_end = -1
+        for start, end, tag, rule_name in raw_spans:
+            if start >= last_end:
+                clean_spans.append((start, end, tag, rule_name))
+                last_end = end
+
+        # Construct sanitized text in a single clean forward pass
+        parts = []
+        curr = 0
+        for start, end, tag, _ in clean_spans:
+            parts.append(text[curr:start])
+            parts.append(tag)
+            curr = end
+        parts.append(text[curr:])
+        sanitized = "".join(parts)
 
         return sanitized, {
             "has_sensitive_data": len(findings) > 0,

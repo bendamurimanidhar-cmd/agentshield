@@ -15,6 +15,18 @@ class AuditLogger:
         self.log_path = log_path
         self.previous_hash = "GENESIS_BLOCK"
 
+        # Resume cryptographic chain if log file already exists
+        if self.log_path and os.path.exists(self.log_path):
+            try:
+                with open(self.log_path, "r", encoding="utf-8") as f:
+                    lines = [l.strip() for l in f if l.strip()]
+                    if lines:
+                        last_record = json.loads(lines[-1])
+                        if "hash" in last_record:
+                            self.previous_hash = last_record["hash"]
+            except Exception:
+                pass
+
     def log_event(self, event_type: str, details: Dict[str, Any]) -> Dict[str, Any]:
         record = {
             "timestamp": time.time(),

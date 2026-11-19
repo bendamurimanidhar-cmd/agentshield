@@ -137,8 +137,11 @@ class AgentShieldProxyHandler(http.server.BaseHTTPRequestHandler):
 
         # 5. FORWARDING / RESPONSE
         if self.upstream_url:
-            # Forward transparently to upstream model API (e.g. OpenAI)
-            self._forward_upstream(raw_body)
+            # If sensitive credentials detected, sanitize the payload before forwarding upstream
+            payload_to_forward = raw_body
+            if dlp_meta["has_sensitive_data"]:
+                payload_to_forward, _ = self.dlp.scan_and_redact(raw_body)
+            self._forward_upstream(payload_to_forward)
         else:
             # Standalone Protected Shield Mock / Pass-through Response
             resp_data = {
