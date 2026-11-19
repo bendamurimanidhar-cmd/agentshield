@@ -17,6 +17,7 @@ from agentshield.core.firewall import AIFirewall
 from agentshield.core.pii_dlp import PIISanitizer
 from agentshield.core.tool_gatekeeper import ToolGatekeeper
 from agentshield.core.audit_logger import AuditLogger
+from agentshield.core.service_manager import ServiceManager
 from agentshield.proxy.server import run_proxy_server
 
 def scan_input(text: str):
@@ -76,6 +77,9 @@ def main():
     verify_p = sub.add_parser("verify-audit", help="Verify cryptographic integrity of an audit log file")
     verify_p.add_argument("logfile", help="Path to audit log JSONL file")
 
+    service_p = sub.add_parser("service", help="Manage background OS service (auto-start on boot & auto-restart on crash)")
+    service_p.add_argument("action", choices=["install", "status", "uninstall"], help="Service action")
+
     args = p.parse_args()
 
     if args.command in ["start", None]:
@@ -97,6 +101,17 @@ def main():
         logger = AuditLogger()
         res = logger.verify_chain(args.logfile)
         print(json.dumps(res, indent=2))
+    elif args.command == "service":
+        sm = ServiceManager()
+        if args.action == "install":
+            res = sm.install()
+            print(json.dumps(res, indent=2))
+        elif args.action == "status":
+            res = sm.status()
+            print(json.dumps(res, indent=2))
+        elif args.action == "uninstall":
+            res = sm.uninstall()
+            print(json.dumps(res, indent=2))
     else:
         p.print_help()
 
