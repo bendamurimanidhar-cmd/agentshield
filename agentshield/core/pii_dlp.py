@@ -9,7 +9,7 @@ from typing import Dict, Any, Tuple, List
 class PIISanitizer:
     def __init__(self):
         self.dlp_rules = {
-            "PRIVATE_KEY": re.compile(r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----'),
+            "PRIVATE_KEY": re.compile(r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----(?:(?!-----BEGIN)[\s\S])*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----'),
             "JWT_TOKEN": re.compile(r'\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b'),
             "OPENAI_KEY": re.compile(r'\bsk-[a-zA-Z0-9]{32,}\b', re.IGNORECASE),
             "GCP_API_KEY": re.compile(r'\bAIza[0-9A-Za-z-_]{30,40}\b'),
@@ -19,7 +19,8 @@ class PIISanitizer:
             "GENERIC_SECRET": re.compile(r'(?:api[_-]?key|secret|password|bearer)\s*[:=]\s*["\']?([a-zA-Z0-9_\-]{16,})["\']?', re.IGNORECASE),
             "CREDIT_CARD": re.compile(r'\b(?:\d{4}[ -]?){3}\d{4}\b'),
             "SSN": re.compile(r'\b\d{3}-\d{2}-\d{4}\b'),
-            "EMAIL": re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b')
+            # Length caps (RFC 5321) keep EMAIL linear: an unbounded local part rescanned long dotted runs.
+            "EMAIL": re.compile(r'\b[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,63}\b')
         }
 
     def scan_and_redact(self, text: str) -> Tuple[str, Dict[str, Any]]:

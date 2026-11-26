@@ -1,15 +1,17 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentshield"
-version = "1.0.0"
+version = "1.1.0"
 description = "Sub-5ms Runtime AI Firewall & Security Gateway for Enterprise LLM Agents"
 readme = "README.md"
 requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
-    { name = "DeepMind & Engineering Squad" }
+    { name = "bendamurimanidhar-cmd" }
 ]
 keywords = ["ai-security", "prompt-injection", "firewall", "dlp", "llm-guard", "soc2", "tool-gatekeeper"]
 classifiers = [

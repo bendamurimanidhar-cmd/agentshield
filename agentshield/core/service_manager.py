@@ -8,6 +8,8 @@ import sys
 import shutil
 import platform
 import subprocess
+import shlex
+from xml.sax.saxutils import escape
 import urllib.request
 import json
 from typing import Dict, Any
@@ -19,14 +21,15 @@ class ServiceManager:
         self.log_dir = os.path.join(self.home, ".agentshield")
         os.makedirs(self.log_dir, exist_ok=True)
 
-        self.bin_path = shutil.which("agentshield") or os.path.join(self.home, ".local", "bin", "agentshield")
-        if not os.path.exists(self.bin_path):
-            self.bin_path = sys.executable
+        bin_path = shutil.which("agentshield") or os.path.join(self.home, ".local", "bin", "agentshield")
+        # Without the console script, run the module; plain `python start` would just fail.
+        self.command = [bin_path] if os.path.exists(bin_path) else [sys.executable, "-m", "agentshield.cli"]
 
         self.plist_path = os.path.join(self.home, "Library", "LaunchAgents", "com.agentshield.daemon.plist")
         self.systemd_path = os.path.join(self.home, ".config", "systemd", "user", "agentshield.service")
 
-    def install(self) -> Dict[str, Any]:
+    def install(self, upstream: str = None) -> Dict[str, Any]:
+        argv = self.command + ["start"] + (["--upstream", upstream] if upstream else [])
         if "darwin" in self.os_type:
             # macOS launchd setup
             launch_agents_dir = os.path.dirname(self.plist_path)
@@ -40,9 +43,7 @@ class ServiceManager:
     <string>com.agentshield.daemon</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{self.bin_path}</string>
-        <string>start</string>
-    </array>
+{"".join(f"        <string>{escape(a)}</string>\n" for a in argv)}    </array>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -79,7 +80,7 @@ Description=AgentShield Autonomous AI Firewall Daemon
 After=network.target
 
 [Service]
-ExecStart={self.bin_path} start
+ExecStart={" ".join(shlex.quote(a) for a in argv)}
 Restart=always
 RestartSec=3
 StandardOutput=append:{os.path.join(self.log_dir, "daemon.log")}

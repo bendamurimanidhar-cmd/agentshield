@@ -40,9 +40,9 @@ class AIFirewall:
             re.compile(r'\boutput\s+the\s+text\s+above\b', re.IGNORECASE),
             re.compile(r'\breveal\s+your\s+(system\s+|hidden\s+)?(prompt|instructions)\b', re.IGNORECASE),
             re.compile(r'(\[system\]|\[system_instruction\]|<\|im_start\|>|<\|im_end\|>|\[INST\]|\[/INST\]|---\s*(?:begin|end)\s*system\s*(?:prompt|instructions)\s*---)', re.IGNORECASE),
-            re.compile(r'<script.*?>.*?</script>', re.IGNORECASE | re.DOTALL),
+            re.compile(r'<script(?:(?!<script).)*?</script>', re.IGNORECASE | re.DOTALL),
             re.compile(r'\bjavascript:\s*', re.IGNORECASE),
-            re.compile(r'\bbase64\s+decode.*?(?:rm\s+-rf|sudo|chmod|cat\s+/etc)', re.IGNORECASE)
+            re.compile(r'\bbase64\s+decode(?:(?!base64).)*?(?:rm\s+-rf|sudo|chmod|cat\s+/etc)', re.IGNORECASE)
         ]
 
         # 2. Spaceless Invariant Signatures (catches extreme character spacing, punctuation, & concatenation)
@@ -50,7 +50,7 @@ class AIFirewall:
             re.compile(r'ignore(?:all)?(?:previous|prior|above)(?:instructions|prompts|rules)', re.IGNORECASE),
             re.compile(r'disregard(?:all)?(?:previous|prior|above)(?:instructions|prompts|rules)', re.IGNORECASE),
             re.compile(r'forget(?:all)?(?:previous|prior)(?:instructions|prompts|rules)', re.IGNORECASE),
-            re.compile(r'(?:danmode|jailbreak|unfilteredmode|developermode|godmode)', re.IGNORECASE),
+            re.compile(r'(?:danmode|jailbreak|unfilteredmode|youarenowindevelopermode|godmode)', re.IGNORECASE),
             re.compile(r'whatisyoursystemprompt', re.IGNORECASE),
             re.compile(r'repeat(?:all)?(?:the)?(?:initial|original|system)(?:instructions|prompts)', re.IGNORECASE),
             re.compile(r'outputthetextabove', re.IGNORECASE),

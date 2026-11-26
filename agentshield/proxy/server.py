@@ -18,7 +18,13 @@ from agentshield.core.firewall import AIFirewall
 from agentshield.core.pii_dlp import PIISanitizer
 from agentshield.core.tool_gatekeeper import ToolGatekeeper
 from agentshield.core.audit_logger import AuditLogger
+from agentshield.core.jsonwalk import iter_strings, map_strings
+from agentshield import __version__
 
+MAX_BODY_BYTES = 10 * 1024 * 1024
+UPSTREAM_TIMEOUT_S = 300  # long completions routinely take over 30 s
+DROP_REQUEST_HEADERS = {"host", "content-length", "accept-encoding", "connection", "keep-alive", "transfer-encoding"}
+DROP_RESPONSE_HEADERS = {"content-length", "transfer-encoding", "content-encoding", "connection", "keep-alive"}
 DEFAULT_LOG_PATH = os.path.join(os.path.expanduser("~"), ".agentshield", "audit.jsonl")
 
 class AgentShieldProxyHandler(http.server.BaseHTTPRequestHandler):
@@ -61,25 +67,25 @@ class AgentShieldProxyHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             content_len = int(self.headers.get("Content-Length", 0))
+            if content_len > MAX_BODY_BYTES:
+                self.send_error(413, "Payload Too Large")
+                return
             raw_body = self.rfile.read(content_len).decode("utf-8", errors="ignore")
 
-            # 1. Parse payload text (OpenAI / Anthropic format or raw text)
-            extracted_text = raw_body
+            # 1. Parse payload (any JSON shape: OpenAI, Anthropic, list-form content, or raw text)
             tool_calls = []
-            is_json = False
-
             try:
                 parsed_json = json.loads(raw_body)
                 is_json = True
-                # Extract messages if standard OpenAI chat payload
-                if "messages" in parsed_json and isinstance(parsed_json["messages"], list):
-                    extracted_text = " ".join([m.get("content", "") for m in parsed_json["messages"] if isinstance(m.get("content"), str)])
-                elif "prompt" in parsed_json:
-                    extracted_text = str(parsed_json["prompt"])
-                
-                if "tool_calls" in parsed_json and isinstance(parsed_json["tool_calls"], list):
+            except ValueError:
+                parsed_json, is_json = None, False
+            if is_json:
+                # Inspect every string in the body, not only messages[].content: list-form content
+                # parts and fields like Anthropic's "system" were previously skipped entirely.
+                extracted_text = " ".join(iter_strings(parsed_json))
+                if isinstance(parsed_json, dict) and isinstance(parsed_json.get("tool_calls"), list):
                     tool_calls = parsed_json["tool_calls"]
-            except Exception:
+            else:
                 extracted_text = raw_body
 
             # 2. RUNTIME FIREWALL SCAN (Prompt Injection, Leetspeak, Jailbreaks)
@@ -100,58 +106,63 @@ class AgentShieldProxyHandler(http.server.BaseHTTPRequestHandler):
                 return
 
             # 3. RUNTIME TOOL EXECUTION GATEKEEPER
-            if tool_calls:
-                for tc in tool_calls:
-                    func = tc.get("function", {})
-                    name = func.get("name", "unknown")
-                    args = func.get("arguments", {})
-                    if isinstance(args, str):
-                        try:
-                            args = json.loads(args)
-                        except Exception:
-                            args = {"raw": args}
-                    gk_res = self.gatekeeper.authorize_tool_call(name, args)
-                    if not gk_res["authorized"]:
-                        self._send_blocked_response(
-                            status_code=403,
-                            reason="BLOCKED_BY_TOOL_GATEKEEPER",
-                            violations=[{"policy": gk_res.get("policy"), "reason": gk_res.get("reason")}],
-                            latency_ms=fw_res["latency_ms"]
-                        )
-                        self.logger.log_event("TOOL_INTERCEPT", {
-                            "client": self.client_address[0],
-                            "tool": name,
-                            "action": "BLOCKED",
-                            "reason": gk_res.get("reason")
-                        })
-                        return
+            for tc in tool_calls:
+                func = tc.get("function", {})
+                name = func.get("name", "unknown")
+                args = func.get("arguments", {})
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except Exception:
+                        args = {"raw": args}
+                gk_res = self.gatekeeper.authorize_tool_call(name, args)
+                if not gk_res["authorized"]:
+                    self._send_blocked_response(
+                        status_code=403,
+                        reason="BLOCKED_BY_TOOL_GATEKEEPER",
+                        violations=[{"policy": gk_res.get("policy"), "reason": gk_res.get("reason")}],
+                        latency_ms=fw_res["latency_ms"]
+                    )
+                    self.logger.log_event("TOOL_INTERCEPT", {
+                        "client": self.client_address[0],
+                        "tool": name,
+                        "action": "BLOCKED",
+                        "reason": gk_res.get("reason")
+                    })
+                    return
 
-            # 4. RUNTIME DATA LOSS PREVENTION (DLP Redaction)
-            sanitized_text, dlp_meta = self.dlp.scan_and_redact(extracted_text)
+            # 4. RUNTIME DATA LOSS PREVENTION: redact each string value, so the JSON stays valid
+            redactions = 0
+            def redact(text: str) -> str:
+                nonlocal redactions
+                out, meta = self.dlp.scan_and_redact(text)
+                redactions += meta["findings_count"]
+                return out
+            if is_json:
+                sanitized = map_strings(parsed_json, redact)
+                payload_to_forward = json.dumps(sanitized)
+            else:
+                sanitized = payload_to_forward = redact(raw_body)
 
             # Log authorized clean transaction
             audit_record = self.logger.log_event("REQUEST_CLEARED", {
                 "client": self.client_address[0],
                 "path": self.path,
                 "latency_ms": fw_res["latency_ms"],
-                "dlp_redactions": dlp_meta["findings_count"]
+                "dlp_redactions": redactions
             })
 
             # 5. FORWARDING / RESPONSE
             if self.upstream_url:
-                # If sensitive credentials detected, sanitize the payload before forwarding upstream
-                payload_to_forward = raw_body
-                if dlp_meta["has_sensitive_data"]:
-                    payload_to_forward, _ = self.dlp.scan_and_redact(raw_body)
                 self._forward_upstream(payload_to_forward)
             else:
                 # Standalone Protected Shield Mock / Pass-through Response
                 resp_data = {
                     "status": "APPROVED",
-                    "shield": "AgentShield v1.0.0",
+                    "shield": f"AgentShield v{__version__}",
                     "firewall": "PASSED (<0.05ms)",
-                    "dlp_redactions": dlp_meta["findings_count"],
-                    "sanitized_input": sanitized_text if dlp_meta["has_sensitive_data"] else "CLEAN",
+                    "dlp_redactions": redactions,
+                    "sanitized_input": sanitized if redactions else "CLEAN",
                     "audit_block_hash": audit_record["hash"][:16] + "...",
                     "message": "Traffic cleared by autonomous AI guardrail."
                 }
@@ -186,33 +197,29 @@ class AgentShieldProxyHandler(http.server.BaseHTTPRequestHandler):
 
     def _forward_upstream(self, body_str: str):
         target = self.upstream_url.rstrip("/") + self.path
-        req = urllib.request.Request(
-            target,
-            data=body_str.encode("utf-8"),
-            headers={k: v for k, v in self.headers.items() if k.lower() != "host"},
-            method="POST"
-        )
+        # Drop headers that no longer match the (possibly redacted) body, and ask for an
+        # uncompressed reply so the response DLP scan can read it.
+        headers = {k: v for k, v in self.headers.items() if k.lower() not in DROP_REQUEST_HEADERS}
+        headers["Accept-Encoding"] = "identity"
+        req = urllib.request.Request(target, data=body_str.encode("utf-8"), headers=headers, method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = resp.read()
-                # Scan outgoing response for PII leaks
-                resp_text = data.decode("utf-8", errors="ignore")
-                sanitized_resp, _ = self.dlp.scan_and_redact(resp_text)
-                out_bytes = sanitized_resp.encode("utf-8")
-
-                self.send_response(resp.status)
-                for h, val in resp.getheaders():
-                    if h.lower() not in ["content-length", "transfer-encoding"]:
-                        self.send_header(h, val)
-                self.send_header("Content-Length", str(len(out_bytes)))
-                self.end_headers()
-                self.wfile.write(out_bytes)
+            resp = urllib.request.urlopen(req, timeout=UPSTREAM_TIMEOUT_S)
         except urllib.error.HTTPError as e:
-            self.send_response(e.code)
-            self.end_headers()
-            self.wfile.write(e.read())
+            resp = e  # upstream 4xx/5xx: relay it like any other response
         except Exception as e:
             self.send_error(502, f"Bad Gateway: {str(e)}")
+            return
+        with resp:
+            # Scan outgoing response for PII leaks
+            sanitized_resp, _ = self.dlp.scan_and_redact(resp.read().decode("utf-8", errors="ignore"))
+            out_bytes = sanitized_resp.encode("utf-8")
+            self.send_response(resp.status)
+            for h, val in resp.headers.items():
+                if h.lower() not in DROP_RESPONSE_HEADERS:
+                    self.send_header(h, val)
+            self.send_header("Content-Length", str(len(out_bytes)))
+            self.end_headers()
+            self.wfile.write(out_bytes)
 
 class ConcurrentThreadingHTTPServer(http.server.ThreadingHTTPServer):
     request_queue_size = 256
@@ -233,7 +240,7 @@ def run_proxy_server(host: str = "127.0.0.1", port: int = 8080, upstream: Option
         print(f" Upstream Target: {upstream}")
     else:
         print(f" Mode          : Autonomous Guardrail & Inspection Engine")
-    print(f" Audit Ledger  : audit.jsonl (Tamper-proof SHA-256)")
+    print(f" Audit Ledger  : {DEFAULT_LOG_PATH} (Tamper-evident SHA-256)")
     print("-" * 65)
     print(" 🚀 To protect your app or AI agent:")
     print(f"    export OPENAI_BASE_URL=\"http://{host}:{port}/v1\"")
