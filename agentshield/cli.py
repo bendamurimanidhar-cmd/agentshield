@@ -79,6 +79,7 @@ def main():
 
     service_p = sub.add_parser("service", help="Manage background OS service (auto-start on boot & auto-restart on crash)")
     service_p.add_argument("action", choices=["install", "status", "uninstall"], help="Service action")
+    service_p.add_argument("--upstream", default=None, help="Upstream LLM API URL the service forwards to (install only)")
 
     args = p.parse_args()
 
@@ -104,7 +105,7 @@ def main():
     elif args.command == "service":
         sm = ServiceManager()
         if args.action == "install":
-            res = sm.install()
+            res = sm.install(upstream=args.upstream)
             print(json.dumps(res, indent=2))
         elif args.action == "status":
             res = sm.status()

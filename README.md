@@ -5,7 +5,7 @@
 [![Latency](https://img.shields.io/badge/latency-%3C0.05ms-blue.svg)]()
 [![Throughput](https://img.shields.io/badge/throughput-79k%20ops%2Fsec-purple.svg)]()
 [![Security](https://img.shields.io/badge/standard-OWASP%20LLM%20Top%2010-red.svg)]()
-[![Release](https://img.shields.io/badge/release-v1.0.0-blue.svg)](https://github.com/bendamurimanidhar-cmd/agentshield/releases/tag/v1.0.0)
+[![Release](https://img.shields.io/badge/release-v1.1.0-blue.svg)](https://github.com/bendamurimanidhar-cmd/agentshield/releases)
 
 `AgentShield` is an enterprise-grade autonomous runtime firewall and data loss prevention (DLP) gateway for AI agents, LangChain/LlamaIndex apps, and LLM backends.
 
@@ -61,10 +61,10 @@ Open your Terminal and run:
 pip install git+https://github.com/bendamurimanidhar-cmd/agentshield.git
 
 # 2. (Optional) Enable Auto-Start on System Boot & Auto-Restart on Crash
-agentshield service install
+agentshield service install --upstream https://api.openai.com
 
 # 3. Start proxy manually if not using service
-agentshield
+agentshield start --upstream https://api.openai.com
 ```
 *(Uses macOS native `launchd` to keep the firewall running across restarts with zero terminal windows)*
 
@@ -78,10 +78,10 @@ Open your bash shell and run:
 pip3 install git+https://github.com/bendamurimanidhar-cmd/agentshield.git
 
 # 2. (Optional) Enable systemd User Service to survive reboots
-agentshield service install
+agentshield service install --upstream https://api.openai.com
 
 # 3. Start proxy manually if not using service
-agentshield
+agentshield start --upstream https://api.openai.com
 ```
 *(Uses Linux `systemd` user service to keep the firewall running 24/7)*
 
@@ -95,7 +95,7 @@ Open **PowerShell** or **Command Prompt** (cmd.exe) and run:
 pip install git+https://github.com/bendamurimanidhar-cmd/agentshield.git
 
 # 2. Launch the transparent firewall gateway
-agentshield
+agentshield start --upstream https://api.openai.com
 ```
 
 ---
@@ -125,11 +125,13 @@ Once installed, there are two primary ways to use AgentShield:
 In proxy mode, AgentShield acts as a local security barrier between your application and external AI models (OpenAI, Anthropic, local Ollama, etc.).
 
 #### Step 1: Start AgentShield Gateway
-In your terminal, run:
+In your terminal, run (use your provider's base URL, e.g. `http://127.0.0.1:11434` for Ollama):
 ```bash
-agentshield
+agentshield start --upstream https://api.openai.com
 ```
-*(AgentShield starts immediately on `http://127.0.0.1:8080` protecting all incoming and outgoing traffic)*
+*(AgentShield starts on `http://127.0.0.1:8080`. It inspects every string in each request (any message format, including list-form content and system fields), forwards clean traffic to the upstream with secrets redacted, and redacts secrets in the responses too.)*
+
+> Without `--upstream`, AgentShield runs in inspection-only mode: it returns a scan verdict instead of a model reply, so SDK clients will not get completions.
 
 #### Step 2: Route Your Application Traffic Through AgentShield
 
@@ -242,7 +244,7 @@ agentshield verify-audit ~/.agentshield/audit.jsonl
 Ensure AgentShield is always running in the background without keeping a terminal tab open:
 ```bash
 # Auto-start on boot & auto-restart on crash (macOS launchd / Linux systemd)
-agentshield service install
+agentshield service install --upstream https://api.openai.com
 
 # Check if daemon is active and healthy
 agentshield service status

@@ -8,6 +8,8 @@ import re
 import urllib.parse
 from typing import Dict, Any, List
 
+from agentshield.core.jsonwalk import iter_strings
+
 class ToolGatekeeper:
     def __init__(self, allowed_tools: List[str] = None):
         self.allowed_tools = allowed_tools or ["read_file", "search_web", "query_database", "run_test"]
@@ -22,7 +24,7 @@ class ToolGatekeeper:
             re.compile(r'\bchmod\s+(?:-R\s+)?(?:777|a\+rwx)\b', re.IGNORECASE),
             re.compile(r'\bsudo\b', re.IGNORECASE),
             re.compile(r'>\s*/dev/sd[a-z]', re.IGNORECASE),
-            re.compile(r'(?:curl|wget).*?\|\s*(?:sh|bash)', re.IGNORECASE)
+            re.compile(r'(?:curl|wget)(?:(?!curl|wget).)*?\|\s*(?:sh|bash)', re.IGNORECASE)
         ]
 
         # Directory traversal & sensitive system paths (covers ../, ..\, .\./, etc.)
@@ -35,7 +37,7 @@ class ToolGatekeeper:
 
         # Shell command substitution & piping
         self.cmd_injection_patterns = [
-            re.compile(r'\$\(.*?\)', re.DOTALL),
+            re.compile(r'\$\((?:(?!\$\().)*?\)', re.DOTALL),
             re.compile(r'`.*?`', re.DOTALL),
             re.compile(r'[;&|]\s*(?:rm|cat|curl|wget|nc|sh|bash|python|perl)\b', re.IGNORECASE)
         ]
@@ -69,7 +71,8 @@ class ToolGatekeeper:
                 "policy": "TOOL_WHITELIST_VIOLATION"
             }
 
-        raw_arg_str = str(arguments)
+        # Scan the actual strings: str(arguments) escaped \x00 and doubled backslashes, so those rules never fired.
+        raw_arg_str = "\n".join(iter_strings(arguments))
         variants = self._get_decoded_variants(raw_arg_str)
 
         for arg_str in variants:
