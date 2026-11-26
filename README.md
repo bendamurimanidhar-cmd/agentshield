@@ -44,12 +44,12 @@ Where and why teams use AgentShield in production:
 > 💎 **Zero External Dependencies:** Unlike EDA or hardware suites, **AgentShield is 100% self-contained in pure standard-library Python**. It requires **zero C++ compilers, zero databases (no Redis/PostgreSQL), and zero external packages**. Every feature — prompt firewall, DLP secret redaction, tool gatekeeper, reverse proxy, and SHA-256 cryptographic audit ledger — works **100% out of the box immediately upon download**.
 
 ### 📦 Direct File Downloads (All Platforms)
-Download standalone installation packages directly from [GitHub Releases v1.0.0](https://github.com/bendamurimanidhar-cmd/agentshield/releases/tag/v1.0.0):
+Download standalone installation packages directly from [GitHub Releases v1.1.0](https://github.com/bendamurimanidhar-cmd/agentshield/releases/tag/v1.1.0):
 
 | Platform | Download Link | File Type | Size |
 | :--- | :--- | :--- | :--- |
-| **All Platforms (Universal)** | 📦 **[Download agentshield-1.0.0-py3-none-any.whl](https://github.com/bendamurimanidhar-cmd/agentshield/releases/download/v1.0.0/agentshield-1.0.0-py3-none-any.whl)** | Pre-compiled Wheel | ~17 KB |
-| **Source Archive (Linux/macOS/Win)** | 🗜️ **[Download agentshield-1.0.0.tar.gz](https://github.com/bendamurimanidhar-cmd/agentshield/releases/download/v1.0.0/agentshield-1.0.0.tar.gz)** | Source Tarball | ~19 KB |
+| **All Platforms (Universal)** | 📦 **[Download agentshield-1.1.0-py3-none-any.whl](https://github.com/bendamurimanidhar-cmd/agentshield/releases/download/v1.1.0/agentshield-1.1.0-py3-none-any.whl)** | Pre-compiled Wheel | ~17 KB |
+| **Source Archive (Linux/macOS/Win)** | 🗜️ **[Download agentshield-1.1.0.tar.gz](https://github.com/bendamurimanidhar-cmd/agentshield/releases/download/v1.1.0/agentshield-1.1.0.tar.gz)** | Source Tarball | ~19 KB |
 
 ---
 
